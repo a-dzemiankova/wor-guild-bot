@@ -2,15 +2,7 @@ from gspread import service_account
 import os
 from dotenv import load_dotenv
 
-
 load_dotenv()
-serv_acc = os.getenv('SERVICE_ACCOUNT_FILE')
-
-if not serv_acc:
-    raise FileNotFoundError('Файл с конфигурациями сервисного аккаунта не найден')
-
-table_link = 'https://docs.google.com/spreadsheets/d/1vjeqBcC2iK4BDRvwElzu_K0ECLwIgdxsj_XgRoZAR6Q/edit?gid=0#gid=0'
-
 
 class Table:
     def __init__(self, link):
@@ -19,9 +11,16 @@ class Table:
         self.table = self.get_table_by_url(self.client)
 
     @staticmethod
-    def client_init_json():
+    def get_service_acc():
+        serv_acc = os.getenv('SERVICE_ACCOUNT_FILE')
+        if not serv_acc:
+            raise FileNotFoundError('Файл с конфигурациями сервисного аккаунта не найден')
+        return serv_acc
+
+    def client_init_json(self):
         """Создание клиента для работы с Google Sheets."""
-        return service_account(filename=serv_acc)
+        sv = self.get_service_acc()
+        return service_account(filename=sv)
 
     def get_table_by_url(self, client):
         """Получение таблицы из Google Sheets по ссылке."""
@@ -48,23 +47,45 @@ class Table:
             user_config[k] = user_data[k]
         return user_config
 
-    @staticmethod
-    def get_players(config, data):
+
+    def get_players(self, config, data):
         """Сравнивает конфигурации игроков с искомой и возвращает игроков соответствующих указанным конфигурациям"""
-        players = []
+        self.players = []
         for row in data:
             fl = True
             for k in config.keys():
-                if row[k] == '' or row[k] < config[k]:
+                if row[k] == '' or int(row[k]) < int(config[k]):
                     fl = False
                     break
             if fl:
-                players.append((row['Ник'], row['тэг тг']))
-        return players
+                self.players.append((row['Ник'], row['тэг тг']))
+        return self.players
+
+    def get_characters_list(self, data):
+        """Возвращает список всех героев"""
+        characters = list(data[0].keys())[2: -1]
+        return characters
+
+    def get_alternative_players(self, config, data):
+        """При отсутствии игроков с искомыми пробудами и выше, возвращает список игроков,
+        у которых искомые герои в наличии (пробуда 0 и выше)"""
+        alt_players = []
+        for row in data:
+            fl = True
+            for k in config.keys():
+                if row[k] != '':
+                    continue
+                else:
+                    fl = False
+                    break
+            if fl and (row['Ник'], row['тэг тг']) not in self.players:
+                alt_players.append((row['Ник'], row['тэг тг']))
+        return alt_players
 
 
-table = Table(table_link)
-data = table.extract_data_from_sheet('феникс')
-config = {'Аякс': 0, 'Саргак': 0, 'Претус': 3, 'Брокир': 1}
-players = table.get_players(config, data)
-print(players)
+
+# table_link = os.getenv('TABLE_LINK')
+# table = Table(table_link)
+# data = table.extract_data_from_sheet('феникс')
+# config = {'Арача': 5, 'Выс': 5, 'Ган': 4}
+# print(table.get_alternative_players(config, data))

@@ -3,3 +3,4 @@ venv/
 wor-guild-bot.json
 .env
 files/
+__pycache__/
