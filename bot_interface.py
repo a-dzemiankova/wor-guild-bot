@@ -4,7 +4,7 @@ import os
 from parser import Table
 
 load_dotenv()
-token = os.getenv('TOKEN')
+token = os.getenv('TOKENN')
 bot = TeleBot(token)
 table_link = os.getenv('TABLE_LINK')
 table = Table(table_link)
