@@ -19,8 +19,7 @@ class Table:
 
     def client_init_json(self):
         """Создание клиента для работы с Google Sheets."""
-        sv = self.get_service_acc()
-        return service_account(filename=sv)
+        return service_account(filename=self.get_service_acc())
 
     def get_table_by_url(self, client):
         """Получение таблицы из Google Sheets по ссылке."""
