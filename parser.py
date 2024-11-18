@@ -62,7 +62,7 @@ class Table:
         return self.players
 
     def get_characters_list(self, data):
-        """Возвращает список всех героев"""
+        """Возвращает список всех героев."""
         characters = list(data[0].keys())[2: -1]
         return characters
 
