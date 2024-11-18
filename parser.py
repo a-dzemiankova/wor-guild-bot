@@ -48,13 +48,18 @@ class Table:
             user_config[k] = user_data[k]
         return user_config
 
-    def get_players(self, config, data):
+    @staticmethod
+    def get_players(config, data):
         """Сравнивает конфигурации игроков с искомой и возвращает игроков соответствующих указанным конфигурациям"""
         players = []
-        for d in data:
-            user_config = self.get_user_config(config, d)
-            if user_config == config:
-                players.append(d['Ник'])
+        for row in data:
+            fl = True
+            for k in config.keys():
+                if row[k] == '' or row[k] < config[k]:
+                    fl = False
+                    break
+            if fl:
+                players.append((row['Ник'], row['тэг тг']))
         return players
 
 
@@ -62,3 +67,4 @@ table = Table(table_link)
 data = table.extract_data_from_sheet('феникс')
 config = {'Аякс': 0, 'Саргак': 0, 'Претус': 3, 'Брокир': 1}
 players = table.get_players(config, data)
+print(players)
