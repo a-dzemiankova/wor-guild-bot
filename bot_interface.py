@@ -5,8 +5,9 @@ from parser import Table
 
 load_dotenv()
 token = os.getenv('TOKEN')
-bot = TeleBot(token)
 table_link = os.getenv('TABLE_LINK')
+
+bot = TeleBot(token)
 table = Table(table_link)
 config = dict()
 
