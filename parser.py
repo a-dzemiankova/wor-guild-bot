@@ -83,6 +83,7 @@ class Table:
 
 
 
+
 # table_link = os.getenv('TABLE_LINK')
 # table = Table(table_link)
 # data = table.extract_data_from_sheet('феникс')
