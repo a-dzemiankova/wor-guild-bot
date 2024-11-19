@@ -3,6 +3,7 @@ from telebot import TeleBot, types
 from dotenv import load_dotenv
 import os
 from parser import Table
+from settings import TableSettings, CallbackData
 
 load_dotenv()
 token = os.getenv('TOKEN')
@@ -11,7 +12,7 @@ table_link = os.getenv('TABLE_LINK')
 bot = TeleBot(token)
 
 table = Table(table_link)
-table_data = table.extract_data_from_sheet('феникс')
+table_data = table.extract_data_from_sheet(TableSettings.SHEET_1)
 characters = table.get_characters_list(table_data)
 
 messages_id = dict()
@@ -39,7 +40,9 @@ def choose_character(call):
     btns = []
     for character in characters:
         if character not in config:
-            btns.append(types.InlineKeyboardButton(character, callback_data=f"id_{character}"))
+            callback = CallbackData(fl='id', character=character)
+            callback_str = callback.encode()
+            btns.append(types.InlineKeyboardButton(character, callback_data=callback_str))
     btn1 = types.InlineKeyboardButton('Закончить ввод', callback_data='finish')
     markup.add(*btns)
     markup1.add(btn1)
@@ -58,11 +61,14 @@ def choose_character(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('id'))
 def choose_evo(call):
-    character = call.data.split('_')[1]
+    callback_data = CallbackData.decode(call.data)
+    character = callback_data.character
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = []
-    for i in range(6):
-        btns.append(types.InlineKeyboardButton(f"{i}", callback_data=f'evo_{character}_{i}'))
+    for evo in TableSettings.EVOS:
+        callback = CallbackData(fl= 'evo', character=character, evo=evo)
+        callback_str = callback.encode()
+        btns.append(types.InlineKeyboardButton(f"{evo}", callback_data=callback_str))
     markup.add(*btns)
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=messages_id['second_message'],
                           text=f'Выберите пробуду для {character}:')
@@ -71,12 +77,14 @@ def choose_evo(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('evo'))
 def manage_config(call):
-    data = call.data.split('_')
-    character = data[1]
-    evo = data[2]
+    callback_data = CallbackData.decode(call.data)
+    character = callback_data.character
+    evo = callback_data.evo
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn1 = types.InlineKeyboardButton('Добавить в список', callback_data=f'continue_{character}_{evo}')
-    btn2 = types.InlineKeyboardButton('Изменить выбор', callback_data=f'search')
+    callback = CallbackData(fl='continue', character=character, evo=evo)
+    callback_str = callback.encode()
+    btn1 = types.InlineKeyboardButton('Добавить в список', callback_data=callback_str)
+    btn2 = types.InlineKeyboardButton('Изменить выбор', callback_data='search')
     markup.add(btn1, btn2)
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=messages_id['second_message'],
                           text=f'Ваш выбор:\n{character} - {evo}')
@@ -85,9 +93,9 @@ def manage_config(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('continue'))
 def continue_search(call):
-    data = call.data.split('_')
-    character = data[1]
-    evo = data[2]
+    callback_data = CallbackData.decode(call.data)
+    character = callback_data.character
+    evo = callback_data.evo
     config[character] = evo
     choose_character(call)
 

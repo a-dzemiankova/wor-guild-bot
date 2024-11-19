@@ -1,75 +1,55 @@
-from gspread import service_account
+from gspread import service_account, client, spreadsheet
 import os
 from dotenv import load_dotenv
+from settings import TableSettings
 
 load_dotenv()
 
+
 class Table:
-    def __init__(self, link):
+    def __init__(self, link: str):
         self.link = link
         self.client = self.client_init_json()
         self.table = self.get_table_by_url(self.client)
 
-    @staticmethod
-    def get_service_acc():
-        serv_acc = os.getenv('SERVICE_ACCOUNT_FILE')
-        if not serv_acc:
-            raise FileNotFoundError('Файл с конфигурациями сервисного аккаунта не найден')
-        return serv_acc
-
-    def client_init_json(self):
+    def client_init_json(self) -> client.Client:
         """Создание клиента для работы с Google Sheets."""
         return service_account(filename=self.get_service_acc())
 
-    def get_table_by_url(self, client):
+    def get_table_by_url(self, client: client.Client) -> spreadsheet.Spreadsheet:
         """Получение таблицы из Google Sheets по ссылке."""
         return client.open_by_url(self.link)
 
-    def get_worksheets(self):
+    def get_worksheets(self) -> list:
         """Получение списка листов таблицы"""
         return self.table.worksheets()
 
-    def extract_data_from_sheet(self, sheet_name):
+    def extract_data_from_sheet(self, sheet_name: str) -> list[dict]:
         """
         Извлекает данные из указанного листа таблицы Google Sheets и возвращает список словарей.
         """
         worksheet = self.table.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        return data
+        table_data = worksheet.get_all_records()
+        return table_data
 
-    @staticmethod
-    def get_user_config(config, user_data):
-        """Возвращает данные по пробудам искомых героев у конкретного игрока"""
-        keys = list(config.keys())
-        user_config = dict()
-        for k in keys:
-            user_config[k] = user_data[k]
-        return user_config
-
-
-    def get_players(self, config, data):
+    def get_players(self, config: dict, table_data: list[dict]) -> list[tuple]:
         """Сравнивает конфигурации игроков с искомой и возвращает игроков соответствующих указанным конфигурациям"""
         self.players = []
-        for row in data:
+        for row in table_data:
             fl = True
             for k in config.keys():
                 if row[k] == '' or int(row[k]) < int(config[k]):
                     fl = False
                     break
             if fl:
-                self.players.append((row['Ник'], row['тэг тг']))
+                self.players.append((row[TableSettings.NICK], row[TableSettings.TAG]))
         return self.players
 
-    def get_characters_list(self, data):
-        """Возвращает список всех героев."""
-        characters = list(data[0].keys())[2: -1]
-        return characters
-
-    def get_alternative_players(self, config, data):
+    def get_alternative_players(self, config: dict, table_data: list[dict]) -> list[tuple]:
         """При отсутствии игроков с искомыми пробудами и выше, возвращает список игроков,
         у которых искомые герои в наличии (пробуда 0 и выше)"""
         alt_players = []
-        for row in data:
+        for row in table_data:
             fl = True
             for k in config.keys():
                 if row[k] != '':
@@ -77,15 +57,29 @@ class Table:
                 else:
                     fl = False
                     break
-            if fl and (row['Ник'], row['тэг тг']) not in self.players:
-                alt_players.append((row['Ник'], row['тэг тг']))
+            if fl and (row[TableSettings.NICK], row[TableSettings.TAG]) not in self.players:
+                alt_players.append((row[TableSettings.NICK], row[TableSettings.TAG]))
         return alt_players
 
+    @staticmethod
+    def get_service_acc() -> str:
+        """Получение сервисного аккаунта для работы с Google Spreadsheet"""
+        serv_acc = os.getenv('SERVICE_ACCOUNT_FILE')
+        if not serv_acc:
+            raise FileNotFoundError('Файл с конфигурациями сервисного аккаунта не найден')
+        return serv_acc
 
+    @staticmethod
+    def get_user_config(config: dict, user_data: dict) -> dict:
+        """Возвращает данные по пробудам искомых героев у конкретного игрока"""
+        keys = list(config.keys())
+        user_config = dict()
+        for k in keys:
+            user_config[k] = user_data[k]
+        return user_config
 
-
-# table_link = os.getenv('TABLE_LINK')
-# table = Table(table_link)
-# data = table.extract_data_from_sheet('феникс')
-# config = {'Арача': 5, 'Выс': 5, 'Ган': 4}
-# print(table.get_alternative_players(config, data))
+    @staticmethod
+    def get_characters_list(table_data: list[dict]) -> list[str]:
+        """Возвращает список всех героев."""
+        characters = list(table_data[0].keys())[2: -1]
+        return characters
