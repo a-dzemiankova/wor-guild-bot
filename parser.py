@@ -1,7 +1,7 @@
 from gspread import service_account, client, spreadsheet
 import os
 from dotenv import load_dotenv
-from settings import TableSettings
+from settings import TableSettings as ts
 
 load_dotenv()
 
@@ -42,7 +42,7 @@ class Table:
                     fl = False
                     break
             if fl:
-                self.players.append((row[TableSettings.NICK], row[TableSettings.TAG]))
+                self.players.append((row[ts.NICK], row[ts.TAG]))
         return self.players
 
     def get_alternative_players(self, config: dict, table_data: list[dict]) -> list[tuple]:
@@ -57,8 +57,8 @@ class Table:
                 else:
                     fl = False
                     break
-            if fl and (row[TableSettings.NICK], row[TableSettings.TAG]) not in self.players:
-                alt_players.append((row[TableSettings.NICK], row[TableSettings.TAG]))
+            if fl and (row[ts.NICK], row[ts.TAG]) not in self.players:
+                alt_players.append((row[ts.NICK], row[ts.TAG]))
         return alt_players
 
     @staticmethod
@@ -81,5 +81,5 @@ class Table:
     @staticmethod
     def get_characters_list(table_data: list[dict]) -> list[str]:
         """Возвращает список всех героев."""
-        characters = list(table_data[0].keys())[2: -1]
+        characters = list(table_data[ts.CHARACTER_NAME_ROW].keys())[ts.CHARACTER_COLUMN_FIRST:ts.CHARACTER_COLUMN_LAST]
         return characters
