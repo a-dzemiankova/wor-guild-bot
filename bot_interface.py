@@ -2,8 +2,9 @@ from telebot import TeleBot, types
 from dotenv import load_dotenv
 import os
 from parser import Table
-from settings import TableSettings as ts
+from settings import TableSettings as ts, backup_messages_filename
 import time
+import pickle
 
 
 load_dotenv()
@@ -39,49 +40,62 @@ table = Table(table_link)
 table_data = table.extract_data_from_sheet(ts.SHEET_1)
 characters = table.get_characters_list(table_data)
 
-user_configs = dict()
-user_messages_id = dict()
-user_timers = dict()
-user_states = dict()
+
+# <user_id>: {
+#       'messages_ids': {'first_message': 01, 'second_message': 02},
+#       'characters_config': {'<character>': 0, '<character>': 1},
+#       'state': 'active' | 'idle,
+#       'timer': 000321
+#       }
+# <user_id_2> : ...
+users_data = {}
+messages_to_delete = {}
+
+if os.path.exists(backup_messages_filename):
+    with open(backup_messages_filename, 'rb') as f:
+        messages_to_delete = pickle.load(f)
+        for user_id, messages_ids in messages_to_delete.items():
+            if messages_ids:
+                warning_message = bot.send_message(user_id, 'Сервер был перезапущен. Нажмите /start, чтобы начать заново.')
+                users_data[user_id] = {}
+                users_data[user_id]['messages_ids'] = {}
+                users_data[user_id]['messages_ids']['warning_messages'] = warning_message.message_id
+                for message_id in messages_ids:
+                    try:
+                        bot.delete_message(user_id, message_id)
+                    except Exception as e:
+                        if 'message to delete not found' in str(e):
+                            pass
+                        else:
+                            raise
+                messages_to_delete[user_id] = list()
+                messages_to_delete[user_id].append(warning_message.message_id)
 
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.chat.id
-    if user_states.get(user_id) == "active":
-        warning_message = bot.send_message(user_id, "Вы уже начали взаимодействие с ботом. Завершите текущий сценарий "
-                                                    "перед повторным вызовом /start.")
-        user_messages_id[user_id]['warning_message'] = warning_message.message_id
-        bot.delete_message(user_id, message.id)
-        return
-    if user_id in user_messages_id and user_messages_id[user_id]:
-        for v in user_messages_id[user_id].values():
-            bot.delete_message(user_id, v)
-    user_states[user_id] = "active"
-    user_configs[user_id] = dict()
-    user_messages_id[user_id] = dict()
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    btn1 = types.InlineKeyboardButton('Начать поиск', callback_data='search')
-    markup.add(btn1)
-    first_message = bot.send_message(user_id, 'Привет!')
-    second_message = bot.send_message(user_id, 'Давай найдем нужных тебе игроков.', reply_markup=markup)
-    user_messages_id[user_id]['first_message'] = first_message.message_id
-    user_messages_id[user_id]['second_message'] = second_message.message_id
-    bot.delete_message(user_id, message.id)
+def dump_data_to_file(messages):
+    with open(backup_messages_filename, 'wb') as f:
+        pickle.dump(messages, f)
 
 
 def check_for_warning(user_id):
-    if 'warning_message' in user_messages_id[user_id]:
-        bot.delete_message(user_id, user_messages_id[user_id]['warning_message'])
-        user_messages_id[user_id].pop('warning_message')
+    if 'messages_ids' in users_data[user_id] and 'warning_message' in users_data[user_id]['messages_ids']:
+        try:
+            bot.delete_message(user_id, users_data[user_id]['messages_ids']['warning_message'])
+        except Exception as e:
+            if 'message is not modified' in str(e):
+                pass
+            else:
+                raise
+        finally:
+            users_data[user_id]['messages_ids'].pop('warning_message')
 
 
 def edit_characters_list(call, markup=None):
     user_id = call.message.chat.id
-    current_list = '\n'.join(f"{k} - {v}" for k, v in user_configs[user_id].items()) \
-        if user_configs[user_id] else '**Пока пусто**'
+    current_list = '\n'.join(f"{k} - {v}" for k, v in users_data[user_id]['characters_config'].items()) \
+        if users_data[user_id]['characters_config'] else '**Пока пусто**'
     try:
-        bot.edit_message_text(chat_id=user_id, message_id=user_messages_id[user_id]['first_message'],
+        bot.edit_message_text(chat_id=user_id, message_id=users_data[user_id]['messages_ids']['first_message'],
                           text=f'Список героев: \n\n{current_list}\n\n', reply_markup=markup)
     except Exception as e:
         if 'message is not modified' in str(e):
@@ -91,11 +105,76 @@ def edit_characters_list(call, markup=None):
 
 
 def handle_too_fast_click(call, user_id):
-    current_time = time.time()
-    if user_id in user_timers and current_time - user_timers[user_id] < 1:
-        return bot.answer_callback_query(call.id, "Слишком быстро! Подождите немного.")
-    user_timers[user_id] = current_time
-    bot.answer_callback_query(call.id)
+    try:
+        current_time = time.time()
+        if 'timer' in users_data[user_id] and current_time - users_data[user_id]['timer'] < 1:
+            return bot.answer_callback_query(call.id, "Слишком быстро! Подождите немного.")
+        users_data[user_id]['timer'] = current_time
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        if 'query is too old' in str(e):
+            pass
+        else:
+            raise
+
+
+def clear_previous_messages(user_id):
+    if user_id in users_data and users_data[user_id]['messages_ids']:
+        for v in users_data[user_id]['messages_ids'].values():
+            try:
+                bot.delete_message(user_id, v)
+            except Exception as e:
+                if 'message to delete not found' in str(e):
+                    pass
+                else:
+                    raise
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = message.chat.id
+    messages_to_delete[user_id] = list()
+    messages_to_delete[user_id].append(message.id)
+    if user_id in users_data:
+        check_for_warning(user_id)
+    if user_id in users_data and 'state' in users_data[user_id] and users_data[user_id]['state'] == "active":
+        warning_message = bot.send_message(user_id, "Вы уже начали взаимодействие с ботом. Завершите текущий сценарий "
+                                                    "или нажмите /restart, чтобы очистить список и начать заново")
+        messages_to_delete[user_id].append(warning_message.message_id)
+        dump_data_to_file(messages_to_delete)
+        if 'messages_ids' not in users_data[user_id]:
+            users_data[user_id]['messages_ids'] = {}
+        users_data[user_id]['messages_ids']['warning_message'] = warning_message.message_id
+        bot.delete_message(user_id, message.id)
+        return
+    clear_previous_messages(user_id)
+    users_data[user_id] = {}
+    users_data[user_id]['state'] = "active"
+    users_data[user_id]['characters_config'] = {}
+    users_data[user_id]['messages_ids'] = {}
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    btn1 = types.InlineKeyboardButton('Начать поиск', callback_data='search')
+    markup.add(btn1)
+    first_message = bot.send_message(user_id, 'Привет!')
+    second_message = bot.send_message(user_id, 'Давай найдем нужных тебе игроков.', reply_markup=markup)
+    users_data[user_id]['messages_ids']['first_message'] = first_message.message_id
+    users_data[user_id]['messages_ids']['second_message'] = second_message.message_id
+    messages_to_delete[user_id].append(first_message.message_id)
+    messages_to_delete[user_id].append(second_message.message_id)
+    dump_data_to_file(messages_to_delete)
+    bot.delete_message(user_id, message.id)
+
+
+@bot.message_handler(commands=['restart'])
+def restart(message):
+    user_id = message.chat.id
+    messages_to_delete[user_id].append(message.id)
+    dump_data_to_file(messages_to_delete)
+    clear_previous_messages(user_id)
+    users_data[user_id]['state'] = "idle"
+    users_data[user_id]['characters_config'] = {}
+    users_data[user_id]['messages_ids'] = {}
+    start(message)
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'search')
@@ -106,13 +185,13 @@ def choose_character(call):
     markup = types.InlineKeyboardMarkup(row_width=3)
     btns = []
     for character in characters:
-        if character not in user_configs[user_id]:
+        if character not in users_data[user_id]['characters_config']:
             callback = CallbackData(fl='id', character=character)
             callback_str = callback.to_str()
             btns.append(types.InlineKeyboardButton(character, callback_data=callback_str))
     markup.add(*btns)
     try:
-        bot.edit_message_text(chat_id=user_id, message_id=user_messages_id[user_id]['second_message'],
+        bot.edit_message_text(chat_id=user_id, message_id=users_data[user_id]['messages_ids']['second_message'],
                           text="Выберите героя для добавления в список:", reply_markup=markup)
     except Exception as e:
         if 'message is not modified' in str(e):
@@ -137,7 +216,7 @@ def choose_evo(call):
         btns.append(types.InlineKeyboardButton(f"{evo}", callback_data=callback_str))
     markup.add(*btns)
     try:
-        bot.edit_message_text(chat_id=user_id, message_id=user_messages_id[user_id]['second_message'],
+        bot.edit_message_text(chat_id=user_id, message_id=users_data[user_id]['messages_ids']['second_message'],
                               text=f'Выберите пробуду для {character}:')
         bot.edit_message_reply_markup(user_id, call.message.id, reply_markup=markup)
     except Exception as e:
@@ -155,7 +234,7 @@ def manage_config(call):
     callback_data = CallbackData.str_to_callback(call.data)
     character = callback_data.character
     evo = callback_data.evo
-    user_configs[user_id][character] = evo
+    users_data[user_id]['characters_config'][character] = evo
     markup = types.InlineKeyboardMarkup(row_width=2)
     callback = CallbackData(fl='change', character=character)
     callback_str = callback.to_str()
@@ -163,11 +242,11 @@ def manage_config(call):
     btn2 = types.InlineKeyboardButton(f'Отменить: {character}', callback_data=callback_str)
     btn3 = types.InlineKeyboardButton('Продолжить', callback_data='continue')
     markup.add(btn1, btn2)
-    if len(user_configs[user_id]) < 5:
+    if len(users_data[user_id]['characters_config']) < 5:
         markup.add(btn3)
     edit_characters_list(call, markup=markup)
-    bot.delete_message(user_id, user_messages_id[user_id]['second_message'])
-    user_messages_id[user_id].pop('second_message')
+    bot.delete_message(user_id, users_data[user_id]['messages_ids']['second_message'])
+    users_data[user_id]['messages_ids'].pop('second_message')
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('change'))
@@ -177,7 +256,7 @@ def change_last_choice(call):
     handle_too_fast_click(call, user_id)
     callback_data = CallbackData.str_to_callback(call.data)
     character = callback_data.character
-    user_configs[user_id].pop(character)
+    users_data[user_id]['characters_config'].pop(character)
     continue_search(call)
 
 
@@ -187,7 +266,9 @@ def continue_search(call):
     check_for_warning(user_id)
     handle_too_fast_click(call, user_id)
     second_message = bot.send_message(user_id, "Загружаю список героев...")
-    user_messages_id[user_id]['second_message'] = second_message.id
+    messages_to_delete[user_id].append(second_message.message_id)
+    dump_data_to_file(messages_to_delete)
+    users_data[user_id]['messages_ids']['second_message'] = second_message.message_id
     choose_character(call)
 
 
@@ -196,25 +277,28 @@ def find_players(call):
     user_id = call.message.chat.id
     check_for_warning(user_id)
     handle_too_fast_click(call, user_id)
-    players = table.get_players(user_configs[user_id], table_data)
-    alt_players = table.get_alternative_players(user_configs[user_id], table_data)
+    players = table.get_players(users_data[user_id]['characters_config'], table_data)
+    alt_players = table.get_alternative_players(users_data[user_id]['characters_config'], table_data)
     players_str = '\n'.join(f"{players[i][0]} - {players[i][1]}" for i in range(len(players))) if players else \
         '**Точных совпадений не найдено.**'
     alt_players_str = '\n'.join(f"{alt_players[i][0]} - {alt_players[i][1]}" for i in range(len(alt_players))) if \
         alt_players else "**Пусто**."
-    final_list = '\n'.join(f"{k} - {v}" for k, v in user_configs[user_id].items())
+    final_list = '\n'.join(f"{k} - {v}" for k, v in users_data[user_id]['characters_config'].items())
     text = f'Итоговый список:\n\n{final_list}\n\nИгроки с нужными пробудами (указанная или выше):\n\n{players_str}\n\n' \
            f'Игроки с наличием искомых героев:\n\n' \
-           f'{alt_players_str}\n\nНажми /start чтобы начать заново.' if user_configs[user_id] else \
-        '\nВы не выбрали ни одного героя.\n\nНажми /start чтобы начать заново.'
+           f'{alt_players_str}\n\nНажми /start чтобы начать заново.' if users_data[user_id]['characters_config'] else \
+        '\nВы не выбрали ни одного героя.\n\nНажмите /start чтобы начать заново.'
     try:
-        bot.edit_message_text(chat_id=user_id, message_id=user_messages_id[user_id]['first_message'], text=text)
+        bot.delete_message(user_id, users_data[user_id]['messages_ids']['first_message'])
     except Exception as e:
-        if 'message is not modified' in str(e):
+        if 'message to delete not found' in str(e):
             pass
         else:
             raise
-    user_states[user_id] = "idle"
+    bot.send_message(user_id, text)
+    messages_to_delete[user_id] = list()
+    dump_data_to_file(messages_to_delete)
+    users_data[user_id]['state'] = "idle"
 
 
 bot.infinity_polling()

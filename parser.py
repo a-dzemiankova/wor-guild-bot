@@ -22,7 +22,9 @@ class Table:
 
     def get_worksheets(self) -> list:
         """Получение списка листов таблицы"""
-        return self.table.worksheets()
+        worksheets_raw = self.table.worksheets()
+        worksheets = [str(ws).split()[1].strip("'") for ws in worksheets_raw]
+        return worksheets
 
     def extract_data_from_sheet(self, sheet_name: str) -> list[dict]:
         """

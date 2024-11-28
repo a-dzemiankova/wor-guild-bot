@@ -1,6 +1,8 @@
 .idea/
 venv/
+tmp/
 wor-guild-bot.json
 .env
 files/
 __pycache__/
+users_messages.pkl

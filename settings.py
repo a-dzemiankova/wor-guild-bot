@@ -8,4 +8,4 @@ class TableSettings:
     CHARACTER_COLUMN_FIRST = 2
     CHARACTER_COLUMN_LAST = -1
 
-
+backup_messages_filename = 'users_messages.pkl'
