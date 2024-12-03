@@ -178,10 +178,6 @@ def start(message):
     bot.delete_message(user_id, message.id)
 
 
-# decorator:
-#    call core function
-#    (decorator logic)
-
 @bot.message_handler(commands=['restart'])
 def restart(message):
     user_id = message.chat.id
