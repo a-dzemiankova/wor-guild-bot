@@ -5,6 +5,18 @@ from parser import Table
 from settings import TableSettings as ts, backup_messages_filename
 import time
 import pickle
+import logging
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+logger.info('Сервер запущен.')
 
 
 load_dotenv()
@@ -12,33 +24,25 @@ token = os.getenv('TOKEN')
 table_link = os.getenv('TABLE_LINK')
 
 bot = TeleBot(token)
-
-
-class CallbackData:
-    def __init__(self, fl=None, character=None, evo=None):
-        self.fl = fl
-        self.character = character
-        self.evo = evo
-
-    def to_str(self):
-        return '_'.join([str(v) for v in self.__dict__.values() if v is not None])
-
-    @staticmethod
-    def str_to_callback(callback_data: str):
-        if '_' in callback_data:
-            evo = None
-            parts = callback_data.split("_")
-            fl = parts[0]
-            character = parts[1]
-            if len(parts) > 2:
-                evo = parts[2]
-            return CallbackData(fl=fl, character=character, evo=evo)
-        return CallbackData(character=callback_data)
+logger.info('Бот создан.')
 
 
 table = Table(table_link)
-table_data = table.extract_data_from_sheet(ts.SHEET_1)
-characters = table.get_characters_list(table_data)
+guilds = table.get_worksheets()
+table_data = {}
+for guild in guilds:
+    table_data[guild] = {}
+    table_data[guild].setdefault('data', table.extract_data_from_sheet(guild))
+    table_data[guild].setdefault('last_extract_data', time.time())
+
+
+def data_from_sheet(guild):
+    if table_data[guild]['last_extract_data'] < time.time() - ts.UPDATE_RANGE:
+        logger.info(f"Данные по гильдии {guild} обновлены")
+        table_data[guild].setdefault('data', table.extract_data_from_sheet(guild))
+        table_data[guild]['last_extract_data'] = time.time()
+
+    return table_data[guild]['data']
 
 
 # <user_id>: {
@@ -46,6 +50,7 @@ characters = table.get_characters_list(table_data)
 #       'characters_config': {'<character>': 0, '<character>': 1},
 #       'state': 'active' | 'idle,
 #       'timer': 000321
+#       'guild': 'феникс'
 #       }
 # <user_id_2> : ...
 users_data = {}
@@ -54,6 +59,7 @@ messages_to_delete = {}
 if os.path.exists(backup_messages_filename):
     with open(backup_messages_filename, 'rb') as f:
         messages_to_delete = pickle.load(f)
+        logger.info("Получены messages_to_delete из файла")
 
         for user_id, messages_ids in messages_to_delete.items():
             if messages_ids:
@@ -140,6 +146,7 @@ def clear_previous_messages(user_id):
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
+    logger.info(f"Бот запущен пользователем {user_id}")
     messages_to_delete[user_id] = list()
     messages_to_delete[user_id].append(message.id)
     check_for_warning(user_id)
@@ -163,7 +170,7 @@ def start(message):
     users_data[user_id]['messages_ids'] = {}
 
     markup = types.InlineKeyboardMarkup(row_width=3)
-    btn1 = types.InlineKeyboardButton('Начать поиск', callback_data='search')
+    btn1 = types.InlineKeyboardButton('Начать поиск', callback_data='guild')
     markup.add(btn1)
 
     first_message = bot.send_message(user_id, 'Привет!')
@@ -181,6 +188,7 @@ def start(message):
 @bot.message_handler(commands=['restart'])
 def restart(message):
     user_id = message.chat.id
+    logger.info(f"Бот перезапущен пользователем {user_id}")
     messages_to_delete[user_id].append(message.id)
 
     dump_data_to_file(messages_to_delete)
@@ -193,19 +201,55 @@ def restart(message):
     start(message)
 
 
-@bot.callback_query_handler(func=lambda call: call.data == 'search')
+@bot.callback_query_handler(func=lambda call: call.data == 'guild')
+def choose_guild(call):
+    user_id = call.message.chat.id
+    warning_too_fast_click(call, user_id)
+    check_for_warning(user_id)
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btns = []
+    for guild in guilds:
+        btns.append(types.InlineKeyboardButton(guild, callback_data=f"search_{guild}"))
+    markup.add(*btns)
+    try:
+        bot.edit_message_text(chat_id=user_id, message_id=users_data[user_id]['messages_ids']['second_message'],
+                              text="Выберите гильдию:", reply_markup=markup)
+    except Exception as e:
+        if 'message is not modified' in str(e):
+            pass
+        else:
+            raise
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('search'))
 def choose_character(call):
     user_id = call.message.chat.id
     warning_too_fast_click(call, user_id)
     check_for_warning(user_id)
 
+    if 'guild' not in users_data[user_id]:
+        guild = call.data.split('_')[1]
+        users_data[user_id]['guild'] = guild
+        logger.info(f"Пользователь {user_id} начал работу с гильдией {guild}")
+
     markup = types.InlineKeyboardMarkup(row_width=3)
     btns = []
+    guild_data = data_from_sheet(users_data[user_id]['guild'])
+    if not guild_data:
+        clear_previous_messages(user_id)
+        warning_message = bot.send_message(user_id, f"Нет данных по гильдии \"{users_data[user_id]['guild']}\"."
+                                                    f" Нажмите /restart чтобы начать заново.")
+        if 'messages_ids' not in users_data[user_id]:
+            users_data[user_id]['messages_ids'] = {}
+        users_data[user_id]['messages_ids']['warning_message'] = warning_message.message_id
+        messages_to_delete[user_id].append(warning_message.message_id)
+        dump_data_to_file(messages_to_delete)
+        return
+    characters = table.get_characters_list(guild_data)
     for character in characters:
         if character not in users_data[user_id]['characters_config']:
-            callback = CallbackData(fl='id', character=character)
-            callback_str = callback.to_str()
-            btns.append(types.InlineKeyboardButton(character, callback_data=callback_str))
+            btns.append(types.InlineKeyboardButton(character, callback_data=f"id_{character}"))
     markup.add(*btns)
 
     try:
@@ -226,15 +270,11 @@ def choose_evo(call):
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
 
-    callback_data = CallbackData.str_to_callback(call.data)
-    character = callback_data.character
-
+    character = call.data.split('_')[1]
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = []
     for evo in ts.EVOS:
-        callback = CallbackData(fl='evo', character=character, evo=evo)
-        callback_str = callback.to_str()
-        btns.append(types.InlineKeyboardButton(f"{evo}", callback_data=callback_str))
+        btns.append(types.InlineKeyboardButton(f"{evo}", callback_data=f"evo_{character}_{evo}"))
     markup.add(*btns)
 
     try:
@@ -254,15 +294,14 @@ def manage_config(call):
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
 
-    callback_data = CallbackData.str_to_callback(call.data)
-    character = callback_data.character
-    users_data[user_id]['characters_config'][character] = callback_data.evo
+    character = call.data.split('_')[1]
+    evo = call.data.split('_')[2]
+    users_data[user_id]['characters_config'][character] = evo
 
     markup = types.InlineKeyboardMarkup(row_width=2)
-    callback = CallbackData(fl='change', character=character)
-    callback_str = callback.to_str()
+
     btn1 = types.InlineKeyboardButton('Закончить', callback_data='finish')
-    btn2 = types.InlineKeyboardButton(f"Отменить: {character}", callback_data=callback_str)
+    btn2 = types.InlineKeyboardButton(f"Отменить: {character}", callback_data=f"change_{character}")
     markup.add(btn1, btn2)
 
     if len(users_data[user_id]['characters_config']) < ts.MAX_HEROES_TO_CHOSE:
@@ -279,8 +318,7 @@ def change_last_choice(call):
     user_id = call.message.chat.id
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
-    callback_data = CallbackData.str_to_callback(call.data)
-    character = callback_data.character
+    character = call.data.split('_')[1]
     users_data[user_id]['characters_config'].pop(character)
 
     continue_search(call)
@@ -303,6 +341,7 @@ def continue_search(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'finish')
 def find_players(call):
     user_id = call.message.chat.id
+    logger.info(f"Пользователь {user_id} получил итоговый список")
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
 
@@ -314,8 +353,9 @@ def find_players(call):
         else:
             raise
 
-    players = table.get_players(users_data[user_id]['characters_config'], table_data)
-    alt_players = table.get_alternative_players(users_data[user_id]['characters_config'], table_data)
+    guild_data = data_from_sheet(users_data[user_id]['guild'])
+    players = table.get_players(users_data[user_id]['characters_config'], guild_data)
+    alt_players = table.get_alternative_players(users_data[user_id]['characters_config'], guild_data)
     players_str = '\n'.join(f"{players[i][0]} - {players[i][1]}" for i in range(len(players))) if players else \
         '**Точных совпадений не найдено.**'
     alt_players_str = '\n'.join(f"{alt_players[i][0]} - {alt_players[i][1]}" for i in range(len(alt_players))) if \
@@ -330,7 +370,8 @@ def find_players(call):
     messages_to_delete[user_id] = list()
     dump_data_to_file(messages_to_delete)
     users_data[user_id]['state'] = "idle"
+    users_data[user_id].pop('guild')
 
 
 bot.infinity_polling()
-
+logger.info("Бот запущен.")

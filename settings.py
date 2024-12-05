@@ -8,5 +8,6 @@ class TableSettings:
     CHARACTER_COLUMN_FIRST = 2
     CHARACTER_COLUMN_LAST = -1
     MAX_HEROES_TO_CHOSE = 5
+    UPDATE_RANGE = 900
 
 backup_messages_filename = 'users_messages.pkl'
