@@ -8,8 +8,12 @@ import pickle
 import logging
 
 
+load_dotenv()
+token = os.getenv('TOKEN')
+table_link = os.getenv('TABLE_LINK')
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if os.getenv('DEBUG') == '1' else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler()
@@ -17,11 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info('Сервер запущен.')
-
-
-load_dotenv()
-token = os.getenv('TOKEN')
-table_link = os.getenv('TABLE_LINK')
 
 bot = TeleBot(token)
 logger.info('Бот создан.')
@@ -33,14 +32,14 @@ table_data = {}
 for guild in guilds:
     table_data[guild] = {}
     table_data[guild].setdefault('data', table.extract_data_from_sheet(guild))
-    table_data[guild].setdefault('last_extract_data', time.time())
+    table_data[guild].setdefault('last_extract_date', time.time())
 
 
 def data_from_sheet(guild):
-    if table_data[guild]['last_extract_data'] < time.time() - ts.UPDATE_RANGE:
+    if table_data[guild]['last_extract_date'] < time.time() - ts.UPDATE_RANGE:
         logger.info(f"Данные по гильдии {guild} обновлены")
         table_data[guild].setdefault('data', table.extract_data_from_sheet(guild))
-        table_data[guild]['last_extract_data'] = time.time()
+        table_data[guild]['last_extract_date'] = time.time()
 
     return table_data[guild]['data']
 
@@ -72,9 +71,10 @@ if os.path.exists(backup_messages_filename):
                     try:
                         bot.delete_message(user_id, message_id)
                     except Exception as e:
-                        if 'message to delete not found' in str(e):
+                        if 'message to delete not found' in str(e) or "message can't be deleted for everyone" in str(e):
                             pass
                         else:
+                            logger.error(str(e))
                             raise
 
                 messages_to_delete[user_id] = list()
@@ -94,6 +94,7 @@ def check_for_warning(user_id):
             if 'message is not modified' in str(e):
                 pass
             else:
+                logger.error(str(e))
                 raise
         finally:
             users_data[user_id]['messages_ids'].pop('warning_message')
@@ -111,6 +112,7 @@ def edit_characters_list(call, markup=None):
         if 'message is not modified' in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
 
@@ -128,6 +130,7 @@ def warning_too_fast_click(call, user_id):
         if 'query is too old' in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
 
@@ -137,16 +140,17 @@ def clear_previous_messages(user_id):
             try:
                 bot.delete_message(user_id, v)
             except Exception as e:
-                if 'message to delete not found' in str(e):
+                if 'message to delete not found' in str(e) or "message can't be deleted for everyone" in str(e):
                     pass
                 else:
+                    logger.error(str(e))
                     raise
 
 
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    logger.info(f"Бот запущен пользователем {user_id}")
+    logger.debug(f"Бот запущен пользователем {user_id}")
     messages_to_delete[user_id] = list()
     messages_to_delete[user_id].append(message.id)
     check_for_warning(user_id)
@@ -188,7 +192,7 @@ def start(message):
 @bot.message_handler(commands=['restart'])
 def restart(message):
     user_id = message.chat.id
-    logger.info(f"Бот перезапущен пользователем {user_id}")
+    logger.debug(f"Бот перезапущен пользователем {user_id}")
     messages_to_delete[user_id].append(message.id)
 
     dump_data_to_file(messages_to_delete)
@@ -219,6 +223,7 @@ def choose_guild(call):
         if 'message is not modified' in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
 
@@ -231,7 +236,7 @@ def choose_character(call):
     if 'guild' not in users_data[user_id]:
         guild = call.data.split('_')[1]
         users_data[user_id]['guild'] = guild
-        logger.info(f"Пользователь {user_id} начал работу с гильдией {guild}")
+        logger.debug(f"Пользователь {user_id} начал работу с гильдией {guild}")
 
     markup = types.InlineKeyboardMarkup(row_width=3)
     btns = []
@@ -259,6 +264,7 @@ def choose_character(call):
         if 'message is not modified' in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
     edit_characters_list(call)
@@ -271,6 +277,7 @@ def choose_evo(call):
     warning_too_fast_click(call, user_id)
 
     character = call.data.split('_')[1]
+    logger.debug(f"Пользователь {user_id} выбрал героя {character}")
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = []
     for evo in ts.EVOS:
@@ -285,6 +292,7 @@ def choose_evo(call):
         if 'message is not modified' in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
 
@@ -296,6 +304,7 @@ def manage_config(call):
 
     character = call.data.split('_')[1]
     evo = call.data.split('_')[2]
+    logger.debug(f"Пользователь {user_id} выбрал пробуду {evo} для героя {character}")
     users_data[user_id]['characters_config'][character] = evo
 
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -319,6 +328,7 @@ def change_last_choice(call):
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
     character = call.data.split('_')[1]
+    logger.debug(f"Пользователь {user_id} отменил выбор героя {character}")
     users_data[user_id]['characters_config'].pop(character)
 
     continue_search(call)
@@ -341,16 +351,17 @@ def continue_search(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'finish')
 def find_players(call):
     user_id = call.message.chat.id
-    logger.info(f"Пользователь {user_id} получил итоговый список")
+    logger.debug(f"Пользователь {user_id} получил итоговый список")
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
 
     try:
         bot.delete_message(user_id, users_data[user_id]['messages_ids']['first_message'])
     except Exception as e:
-        if 'message to delete not found' in str(e):
+        if 'message to delete not found' in str(e) or "message can't be deleted for everyone" in str(e):
             pass
         else:
+            logger.error(str(e))
             raise
 
     guild_data = data_from_sheet(users_data[user_id]['guild'])
@@ -373,5 +384,6 @@ def find_players(call):
     users_data[user_id].pop('guild')
 
 
-bot.infinity_polling()
 logger.info("Бот запущен.")
+bot.infinity_polling()
+
