@@ -150,7 +150,7 @@ def clear_previous_messages(user_id):
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    logger.debug(f"Бот запущен пользователем {user_id}")
+    logger.info(f"Бот запущен пользователем {user_id}")
     messages_to_delete[user_id] = list()
     messages_to_delete[user_id].append(message.id)
     check_for_warning(user_id)
@@ -192,7 +192,7 @@ def start(message):
 @bot.message_handler(commands=['restart'])
 def restart(message):
     user_id = message.chat.id
-    logger.debug(f"Бот перезапущен пользователем {user_id}")
+    logger.info(f"Бот перезапущен пользователем {user_id}")
     messages_to_delete[user_id].append(message.id)
 
     dump_data_to_file(messages_to_delete)
@@ -236,7 +236,7 @@ def choose_character(call):
     if 'guild' not in users_data[user_id]:
         guild = call.data.split('_')[1]
         users_data[user_id]['guild'] = guild
-        logger.debug(f"Пользователь {user_id} начал работу с гильдией {guild}")
+        logger.info(f"Пользователь {user_id} начал работу с гильдией {guild}")
 
     markup = types.InlineKeyboardMarkup(row_width=3)
     btns = []
@@ -277,7 +277,7 @@ def choose_evo(call):
     warning_too_fast_click(call, user_id)
 
     character = call.data.split('_')[1]
-    logger.debug(f"Пользователь {user_id} выбрал героя {character}")
+    logger.info(f"Пользователь {user_id} выбрал героя {character}")
     markup = types.InlineKeyboardMarkup(row_width=2)
     btns = []
     for evo in ts.EVOS:
@@ -304,7 +304,7 @@ def manage_config(call):
 
     character = call.data.split('_')[1]
     evo = call.data.split('_')[2]
-    logger.debug(f"Пользователь {user_id} выбрал пробуду {evo} для героя {character}")
+    logger.info(f"Пользователь {user_id} выбрал пробуду {evo} для героя {character}")
     users_data[user_id]['characters_config'][character] = evo
 
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -328,7 +328,7 @@ def change_last_choice(call):
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
     character = call.data.split('_')[1]
-    logger.debug(f"Пользователь {user_id} отменил выбор героя {character}")
+    logger.info(f"Пользователь {user_id} отменил выбор героя {character}")
     users_data[user_id]['characters_config'].pop(character)
 
     continue_search(call)
@@ -351,7 +351,7 @@ def continue_search(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'finish')
 def find_players(call):
     user_id = call.message.chat.id
-    logger.debug(f"Пользователь {user_id} получил итоговый список")
+    logger.info(f"Пользователь {user_id} получил итоговый список")
     check_for_warning(user_id)
     warning_too_fast_click(call, user_id)
 
@@ -366,10 +366,12 @@ def find_players(call):
 
     guild_data = data_from_sheet(users_data[user_id]['guild'])
     players = table.get_players(users_data[user_id]['characters_config'], guild_data)
+    sorted_players = sorted(players, key=lambda x: sum(x[2].values()), reverse=True)
     alt_players = table.get_alternative_players(users_data[user_id]['characters_config'], guild_data)
-    players_str = '\n'.join(f"{players[i][0]} - {players[i][1]}" for i in range(len(players))) if players else \
+    sorted_alt_players = sorted(alt_players, key=lambda x: sum(x[2].values()), reverse=True)
+    players_str = '\n'.join(f"{sorted_players[i][0]} - {sorted_players[i][1]}\n{table.get_user_config_pretty(sorted_players[i][2])}\n" for i in range(len(players))) if players else \
         '**Точных совпадений не найдено.**'
-    alt_players_str = '\n'.join(f"{alt_players[i][0]} - {alt_players[i][1]}" for i in range(len(alt_players))) if \
+    alt_players_str = '\n'.join(f"{sorted_alt_players[i][0]} - {sorted_alt_players[i][1]}\n{table.get_user_config_pretty(sorted_alt_players[i][2])}\n" for i in range(len(alt_players))) if \
         alt_players else "**Пусто**."
     final_list = '\n'.join(f"{k} - {v}" for k, v in users_data[user_id]['characters_config'].items())
     text = f"Итоговый список:\n\n{final_list}\n\nИгроки с нужными пробудами (указанная или выше):\n\n{players_str}\n\n" \
