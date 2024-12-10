@@ -44,7 +44,8 @@ class Table:
                     fl = False
                     break
             if fl:
-                self.players.append((row[ts.NICK], row[ts.TAG]))
+                user_config = self.get_user_config(config, row)
+                self.players.append((row[ts.NICK], row[ts.TAG], user_config))
         return self.players
 
     def get_alternative_players(self, config: dict, table_data: list[dict]) -> list[tuple]:
@@ -59,8 +60,9 @@ class Table:
                 else:
                     fl = False
                     break
-            if fl and (row[ts.NICK], row[ts.TAG]) not in self.players:
-                alt_players.append((row[ts.NICK], row[ts.TAG]))
+            user_config = self.get_user_config(config, row)
+            if fl and (row[ts.NICK], row[ts.TAG], user_config) not in self.players:
+                alt_players.append((row[ts.NICK], row[ts.TAG], user_config))
         return alt_players
 
     @staticmethod
@@ -79,6 +81,13 @@ class Table:
         for k in keys:
             user_config[k] = user_data[k]
         return user_config
+
+    @staticmethod
+    def get_user_config_pretty(user_config: dict) -> str:
+        user_config_str = ''
+        for k, v in user_config.items():
+            user_config_str += f"{k}: {v}, "
+        return user_config_str.strip(' ,')
 
     @staticmethod
     def get_characters_list(table_data: list[dict]) -> list[str]:
